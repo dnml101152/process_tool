@@ -783,10 +783,30 @@ class NewProcessWidget(QWidget):
         print("Delete")
 
     def up_clicked(self):
-        print("Up")
+        try:
+            index = self.subs_list.currentRow()
+            if index > 0:
+                data = self.main.process_data[self.process_id]["sub_process_data"]
+                data[index - 1], data[index] = data[index], data[index - 1]
+                self.main.save_process_to_mdb(self.process_id)
+                self.refresh_subs_list()
+                self.subs_list.setCurrentRow(index - 1)
+        except Exception as err:
+            print(str(err))
 
     def down_clicked(self):
-        print("Down")
+        index = self.subs_list.currentRow()
+        data = self.main.process_data[self.process_id]["sub_process_data"]
+        if 0 <= index < len(data) - 1:
+            data[index + 1], data[index] = data[index], data[index + 1]
+            self.main.save_process_to_mdb(self.process_id)
+            self.refresh_subs_list()
+            self.subs_list.setCurrentRow(index + 1)
+
+    def refresh_subs_list(self):
+        self.subs_list.clear()
+        for entry in self.main.process_data[self.process_id]["sub_process_data"]:
+            self.subs_list.addItem(str(entry))
 
     def cancel_clicked(self):
         # Switch back to edit processes widget
@@ -796,6 +816,13 @@ class NewProcessWidget(QWidget):
         self.main.new_widget.title_input.clear()
         self.main.new_widget.header.setText("New Process View")
         self.main.new_widget.subs_list.clear()
+
+    def delete_clicked(self):
+        selected_index = self.subs_list.currentRow()
+        if selected_index >= 0:
+            del self.main.process_data[self.process_id]["sub_process_data"][selected_index]
+            self.main.save_process_to_mdb(self.process_id)
+            self.subs_list.takeItem(selected_index)
 
     def confirm_clicked(self):
         title = self.title_input.text()
