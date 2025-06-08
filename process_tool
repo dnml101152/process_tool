@@ -6,10 +6,10 @@ from PyQt5.QtWidgets import (
     QLabel, QStackedWidget, QGridLayout, QShortcut, QMessageBox
 )
 from PyQt5.QtGui import QFont, QMouseEvent, QKeySequence
-from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtCore import Qt, QPoint, QTimer
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QListWidget, QPushButton,
-    QVBoxLayout, QHBoxLayout, QListWidgetItem, QLineEdit, QDialog, QComboBox, QCheckBox, QScrollArea, QMenu, QAction, QColorDialog
+    QVBoxLayout, QHBoxLayout, QListWidgetItem, QLineEdit, QDialog, QComboBox, QCheckBox, QScrollArea, QMenu, QAction, QColorDialog,QTextEdit, QTextBrowser
 )
 
 
@@ -196,7 +196,7 @@ class Subcheck(QWidget):
 
 # --- Checklist Manager Widget ---
 class ChecklistManagerWidget(QWidget):
-    def __init__(self):
+    def __init__(self, multicheck_input=None):
         super().__init__()
         self.setWindowTitle("Checklist Manager")
         self.setMinimumSize(400, 500)
@@ -204,12 +204,13 @@ class ChecklistManagerWidget(QWidget):
 
         self.layout = QVBoxLayout(self)
 
+        # Label to show current checklist title or prompt
         self.check_label = QLabel("Check item:")
         self.check_label.setAlignment(Qt.AlignCenter)
         self.check_label.setStyleSheet("font-size: 16pt; font-weight: bold;")
         self.layout.addWidget(self.check_label)
 
-        # Input to add new check
+        # Input area with button to add new check item
         add_layout = QHBoxLayout()
         self.check_input = QLineEdit()
         self.check_input.setPlaceholderText("Enter new check...")
@@ -219,7 +220,7 @@ class ChecklistManagerWidget(QWidget):
         add_layout.addWidget(self.add_button)
         self.layout.addLayout(add_layout)
 
-        # Scroll area for added checks
+        # Scrollable container for check items (Subcheck widgets)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.checks_container = QWidget()
@@ -227,7 +228,7 @@ class ChecklistManagerWidget(QWidget):
         self.scroll_area.setWidget(self.checks_container)
         self.layout.addWidget(self.scroll_area)
 
-        # --- Add shortcuts ---
+        # Shortcuts for focusing input and confirming add
         focus_shortcut = QShortcut(QKeySequence("Alt+A"), self)
         focus_shortcut.activated.connect(self.check_input.setFocus)
 
@@ -235,48 +236,128 @@ class ChecklistManagerWidget(QWidget):
         confirm_shortcut.activated.connect(self.add_check)
 
     def add_check(self):
-        text = self.check_input.text().strip()
+        """
+        Adds a new check item to the checklist if input text is not empty.
+        Prevents adding empty or whitespace-only checks.
+        """
+        text = self.check_input.text()
+        if text is None:
+            # Defensive: text should not be None, but handle gracefully
+            return
+        text = text.strip()
         if not text:
+            # Do not add empty checks
             return
 
-        widget = Subcheck(self.checks_container)
-        widget.set_check_text(text)
+        # Create new Subcheck widget and set its text safely
+        try:
+            widget = Subcheck(self.checks_container)
+            if hasattr(widget, "set_check_text"):
+                widget.set_check_text(text)
+            else:
+                # Defensive fallback: if Subcheck lacks method, skip adding
+                return
+        except Exception as e:
+            print(f"Error creating or setting Subcheck widget: {e}")
+            return
+
+        # Add widget to layout and tracking list
         self.checks_layout.addWidget(widget)
         self.checks.append(widget)
+
+        # Clear input field after adding
         self.check_input.clear()
 
+        # Optionally, update validation state
         self.is_valid()
 
     def is_valid(self):
+        """
+        Returns True if all check widgets are valid.
+        Empty checklist is considered valid by design.
+        """
         if not self.checks:
             return True
-        else:
-            return all(check.is_valid() for check in self.checks)
+        try:
+            # Ensure all check widgets implement is_valid method and return True
+            return all(
+                (hasattr(check, "is_valid") and callable(check.is_valid) and check.is_valid())
+                for check in self.checks
+            )
+        except Exception as e:
+            print(f"Error validating checks: {e}")
+            return False
 
     def get_data(self):
-        return [check.get_data() for check in self.checks]
-
+        """
+        Returns a list of data collected from all Subcheck widgets.
+        Returns empty list if no checks or on error.
+        """
+        try:
+            return [
+                check.get_data() if (hasattr(check, "get_data") and callable(check.get_data)) else None
+                for check in self.checks
+            ]
+        except Exception as e:
+            print(f"Error getting data from checks: {e}")
+            return []
 
     def set_check_text(self, text):
-        self.check_label.setText(text)
+        """
+        Sets the checklist title or label text.
+        """
+        if text is None:
+            text = ""
+        self.check_label.setText(str(text))
 
     def reset(self):
-        # Remove all Subcheck widgets from the layout and UI
+        """
+        Removes all Subcheck widgets and clears the checklist.
+        """
+        # Remove widgets safely
         for check in self.checks:
-            check.setParent(None)
-            check.deleteLater()
+            try:
+                check.setParent(None)
+                check.deleteLater()
+            except Exception as e:
+                print(f"Error removing check widget: {e}")
 
-        # Clear the list tracking the widgets
+        # Clear internal list of check widgets
         self.checks.clear()
 
-        # Clear input field text
+        # Clear input text field
         self.check_input.clear()
 
-        # Optional: update the layout to refresh UI
+        # Update layout to reflect changes
         self.checks_layout.update()
 
+    def load_checks(self, checks_list):
+        """
+        Loads a list of checks into the widget, replacing existing checks.
+        Expects checks_list to be a list of strings; ignores invalid data.
+        """
+        self.reset()
 
+        # Defensive check for input type
+        if not isinstance(checks_list, list):
+            print("load_checks expects a list of strings")
+            return
 
+        # Add each check text safely
+        for text in checks_list:
+            if not isinstance(text, str):
+                # Skip non-string items to avoid errors
+                continue
+            try:
+                widget = Subcheck(self.checks_container)
+                if hasattr(widget, "set_check_text"):
+                    widget.set_check_text(text)
+                else:
+                    continue
+                self.checks_layout.addWidget(widget)
+                self.checks.append(widget)
+            except Exception as e:
+                print(f"Error adding Subcheck in load_checks: {e}")
 
 
 
@@ -379,7 +460,6 @@ class CheckStepWidget(QWidget):
         self.comment_input.clear()
 
 
-
 class RunProcessWidget(QWidget):
     def __init__(self, main):
         super().__init__()
@@ -390,33 +470,39 @@ class RunProcessWidget(QWidget):
         self.process_tracking = None
         self.step_widgets = {}
 
-        self.layout = QVBoxLayout(self)
+        # === Outer Layout: Main content (left) + Hints (right) ===
+        outer_layout = QHBoxLayout(self)
+        self.setLayout(outer_layout)
+
+        # === Left Main Content Area ===
+        main_layout = QVBoxLayout()
+        main_container = QWidget()
+        main_container.setLayout(main_layout)
+        outer_layout.addWidget(main_container, 3)  # Stretch factor 3 for main area
 
         self.title_label = QLabel("Run Process")
         self.title_label.setFont(QFont("Arial", 16, QFont.Bold))
         self.title_label.setAlignment(Qt.AlignCenter)
-        self.layout.addWidget(self.title_label)
+        main_layout.addWidget(self.title_label)
 
         self.sub_label = QLabel("Step will show here")
         self.sub_label.setFont(QFont("Arial", 12))
         self.sub_label.setAlignment(Qt.AlignCenter)
-        self.layout.addWidget(self.sub_label)
+        main_layout.addWidget(self.sub_label)
 
-        # Container for step type widgets
         self.step_container = QStackedWidget()
-        self.layout.addWidget(self.step_container)
+        main_layout.addWidget(self.step_container)
 
-        # Initialize step types
         self.widgets_by_type = {
             "question": QuestionStepWidget(),
             "check": CheckStepWidget(),
-            "subcheck": ChecklistManagerWidget()
+            "subcheck": ChecklistManagerWidget(),
+            "multicheck": ChecklistManagerWidget()
         }
 
-        for w in self.widgets_by_type.values():
-            self.step_container.addWidget(w)
+        for widget in self.widgets_by_type.values():
+            self.step_container.addWidget(widget)
 
-        # Navigation buttons
         nav_layout = QHBoxLayout()
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.cancel_process)
@@ -430,81 +516,181 @@ class RunProcessWidget(QWidget):
         self.next_button.clicked.connect(self.go_next_or_finish)
         nav_layout.addWidget(self.next_button)
 
-        next_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
-        next_shortcut.activated.connect(self.next_button.click)
+        # Add keyboard shortcuts
+        QShortcut(QKeySequence("Ctrl+Return"), self, self.next_button.click)
+        QShortcut(QKeySequence("Ctrl+Backspace"), self, self.back_button.click)
 
-        prev_shortcut = QShortcut(QKeySequence("Ctrl+Backspace"), self)
-        prev_shortcut.activated.connect(self.back_button.click)
+        main_layout.addLayout(nav_layout)
 
-        self.layout.addLayout(nav_layout)
+        # === Right Side: Hints Panel ===
+        self.hints_browser = QTextBrowser()
+        self.hints_browser.setMinimumWidth(250)
+        self.hints_browser.setStyleSheet("background-color: #f7f7f7; padding: 10px; font-size: 11pt;")
+        self.hints_browser.setOpenExternalLinks(True)
+        outer_layout.addWidget(self.hints_browser, 1)  # Stretch factor 1 for hints
+
+        # Define static hints per step type
+        self.hint_texts = {
+            "question": "<b>Hint:</b> Read the question carefully before responding.",
+            "check": "<b>Hint:</b> Make sure the stated condition is met.",
+            "subcheck": "<b>Hint:</b> Check each sub-item after reviewing it.",
+            "multicheck": "<b>Hint:</b> Select all applicable items for the current step."
+        }
 
     def update_view(self):
-        if not self.process_data or self.current_index >= len(self.process_data["sub_process_data"]):
+        """
+        Update the visible step and display relevant hints.
+        Includes extensive safety checks.
+        """
+        steps = self.process_data.get("sub_process_data") if isinstance(self.process_data, dict) else None
+        if not steps or not isinstance(steps, list) or not (0 <= self.current_index < len(steps)):
             return
 
-        current_step = self.process_data["sub_process_data"][self.current_index]
-        step_type = current_step["type"]
+        current_step = steps[self.current_index]
+        if not isinstance(current_step, dict):
+            return
+
+        step_type = current_step.get("type")
         text = current_step.get("text", "No text")
 
-        self.sub_label.setText(f"Step {self.current_index + 1} of {len(self.process_data['sub_process_data'])}")
+        self.sub_label.setText(f"Step {self.current_index + 1} of {len(steps)}")
 
         widget = self.widgets_by_type.get(step_type)
-        if widget:
-            if step_type == "question":
-                widget.set_question_text(text)
-            elif step_type == "check":
-                widget.set_check_text(text)
-            elif step_type == "subcheck":
-                widget.set_check_text(text)
-                widget.reset()
-
-            self.step_container.setCurrentWidget(widget)
-
-    def go_next_or_finish(self):
-        current_step = self.process_data["sub_process_data"][self.current_index]
-        widget = self.widgets_by_type.get(current_step["type"])
-
-        if not widget or not widget.is_valid():
-            print("Invalid input for this step.")
+        if not widget:
             return
 
-        # Save response
-        self.process_tracking.setdefault("responses", []).append({
+        try:
+            if step_type == "question" and hasattr(widget, "set_question_text"):
+                widget.set_question_text(text)
+            elif step_type == "check" and hasattr(widget, "set_check_text"):
+                widget.set_check_text(text)
+            elif step_type == "subcheck":
+                if hasattr(widget, "set_check_text"):
+                    widget.set_check_text(text)
+                if hasattr(widget, "reset"):
+                    widget.reset()
+            elif step_type == "multicheck":
+                items = current_step.get("items", [])
+                if not isinstance(items, list):
+                    items = []
+                if hasattr(widget, "load_checks"):
+                    widget.load_checks(items)
+                if hasattr(widget, "set_check_text"):
+                    widget.set_check_text(text)
+        except Exception as e:
+            print(f"Error updating widget: {e}")
+            return
+
+        self.step_container.setCurrentWidget(widget)
+
+        # --- Dynamic hint update ---
+        hints = current_step.get("hints")
+        if isinstance(hints, list) and hints:
+            # Join each hint line as a separate bullet point or paragraph
+            html = "<b>Hints:</b><br>" + "<br>".join(f"&bull; {line}" for line in hints)
+        elif isinstance(hints, str) and hints.strip():
+            html = f"<b>Hint:</b> {hints.strip()}"
+        else:
+            # Fallback to static hints
+            html = self.hint_texts.get(step_type, "<i>No hints for this step.</i>")
+
+        self.hints_browser.setHtml(html)
+
+    def go_next_or_finish(self):
+        """
+        Validate current step, store result, and advance to next or finish.
+        """
+        steps = self.process_data.get("sub_process_data") if isinstance(self.process_data, dict) else None
+        if not steps or not (0 <= self.current_index < len(steps)):
+            print("Invalid process state.")
+            return
+
+        current_step = steps[self.current_index]
+        if not isinstance(current_step, dict):
+            print("Malformed step.")
+            return
+
+        step_type = current_step.get("type")
+        widget = self.widgets_by_type.get(step_type)
+        if not widget or not callable(getattr(widget, "is_valid", None)) or not widget.is_valid():
+            print("Invalid input for current step.")
+            return
+
+        if self.process_tracking is None:
+            self.process_tracking = {"responses": []}
+
+        try:
+            data = widget.get_data() if callable(getattr(widget, "get_data", None)) else None
+        except Exception as e:
+            print(f"Error retrieving widget data: {e}")
+            return
+
+        self.process_tracking["responses"].append({
             "step": self.current_index,
-            "type": current_step["type"],
-            "data": widget.get_data()
+            "type": step_type or "",
+            "data": data
         })
 
         self.current_index += 1
-        if self.current_index < len(self.process_data["sub_process_data"]):
+
+        if self.current_index < len(steps):
             self.update_view()
         else:
+            # Finalize process
             self.process_tracking["status"] = "Completed"
             self.process_tracking["end_time"] = datetime.now()
-            self.main.answer_collection.insert_one(self.process_tracking)
-            self.main.stacked.setCurrentWidget(self.main.grid_widget)
+            try:
+                if hasattr(self.main, "answer_collection"):
+                    self.main.answer_collection.insert_one(self.process_tracking)
+            except Exception as e:
+                print(f"Error saving to DB: {e}")
+
+            try:
+                if hasattr(self.main, "stacked") and hasattr(self.main, "grid_widget"):
+                    self.main.stacked.setCurrentWidget(self.main.grid_widget)
+            except Exception as e:
+                print(f"Error switching to grid widget: {e}")
 
     def go_back(self):
+        """Move back one step if possible."""
         if self.current_index > 0:
             self.current_index -= 1
             self.update_view()
 
     def cancel_process(self):
-        self.process_tracking["status"] = "Cancelled"
-        self.process_tracking["end_time"] = datetime.now()
-        self.main.answer_collection.insert_one(self.process_tracking)
-        self.process_tracking = None
+        """Cancel the process and record status."""
+        if self.process_tracking is not None:
+            self.process_tracking["status"] = "Cancelled"
+            self.process_tracking["end_time"] = datetime.now()
+            try:
+                if hasattr(self.main, "answer_collection"):
+                    self.main.answer_collection.insert_one(self.process_tracking)
+            except Exception as e:
+                print(f"Error saving cancellation data: {e}")
+
         self.process_id = None
-        self.main.stacked.setCurrentWidget(self.main.grid_widget)
+        self.process_tracking = None
+
+        try:
+            if hasattr(self.main, "stacked") and hasattr(self.main, "grid_widget"):
+                self.main.stacked.setCurrentWidget(self.main.grid_widget)
+        except Exception as e:
+            print(f"Error switching UI on cancel: {e}")
 
     def start_process(self, process_data):
+        """Initialize a new process with the provided process_data dict."""
+        if not isinstance(process_data, dict):
+            print("start_process: Invalid input.")
+            return
+
         self.process_data = process_data
+        self.current_index = 0
         self.process_tracking = {
             "start_time": datetime.now(),
-            "title": process_data["title"],
+            "title": process_data.get("title", "Untitled"),
             "responses": []
         }
-        self.current_index = 0
+
         self.update_view()
 class MainGridWidget(QWidget):
     def __init__(self,main):
@@ -529,31 +715,28 @@ class MainGridWidget(QWidget):
                 self.layout.addWidget(button, i, j)
 
 
+
 class AddSubDialog(QDialog):
-    def __init__(self, parent=None,edit = None):
+    def __init__(self, parent=None, edit=None):
         super().__init__(parent)
         self.setWindowTitle("Add New Sub")
         self.setModal(True)
         self.setMinimumWidth(300)
+        self.edit = edit  # Optional dict for editing an existing step
 
         layout = QVBoxLayout(self)
 
-        # Type selection
+        # --- Type selection combo box ---
         layout.addWidget(QLabel("Sub Type:"))
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["question", "check","subcheck"])
+        self.type_combo.addItems(["question", "check", "subcheck", "multicheck"])
         layout.addWidget(self.type_combo)
 
-        # Text input
-        layout.addWidget(QLabel("Text:"))
-        self.text_input = QLineEdit()
-        self.text_input.setPlaceholderText("Enter sub-process text...")
-        if edit:
-            self.text_input.setText(edit["text"])
+        # --- Dynamic container for input fields ---
+        self.input_container = QVBoxLayout()
+        layout.addLayout(self.input_container)
 
-        layout.addWidget(self.text_input)
-
-        # Buttons
+        # --- OK / Cancel Buttons ---
         button_layout = QHBoxLayout()
         self.ok_button = QPushButton("OK")
         self.cancel_button = QPushButton("Cancel")
@@ -561,23 +744,130 @@ class AddSubDialog(QDialog):
         button_layout.addWidget(self.cancel_button)
         layout.addLayout(button_layout)
 
-        # Connect signals
+        # Signal connections
         self.ok_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
-        self.ok_button.setEnabled(False)
+        self.ok_button.setEnabled(False)  # Disabled until input is valid
 
-        self.text_input.textChanged.connect(self.validate_input)
+        if edit:
+            type_str = edit.get("type", "")
+            index = self.type_combo.findText(type_str, Qt.MatchFixedString)
+            self.type_combo.setCurrentIndex(index if index >= 0 else 0)
+        else:
+            self.type_combo.setCurrentIndex(0)
+
+        self.type_combo.currentIndexChanged.connect(self.rebuild_entry)
+
+        self.rebuild_entry()
+
+        if edit:
+            QTimer.singleShot(0, self.prefill_edit)
+
+    def prefill_edit(self):
+        subtype = self.type_combo.currentText()
+        text = self.edit.get("text", "")
+
+        if subtype == "multicheck":
+            title = self.edit.get("text", "")
+            items = self.edit.get("items", [])
+            if self.text_title:
+                self.text_title.setText(title)
+            if self.text_widget and isinstance(items, list):
+                self.text_widget.setPlainText("\n".join(items))
+        else:
+            if self.text_widget and isinstance(self.text_widget, QLineEdit) and isinstance(text, str):
+                self.text_widget.setText(text)
+
+        # --- Prefill hint field if available ---
+        hints = self.edit.get("hints", [])
+        if isinstance(hints, list) and self.hint_widget:
+            self.hint_widget.setPlainText("\n".join(hints))
 
     def validate_input(self):
-        self.ok_button.setEnabled(bool(self.text_input.text().strip()))
+        subtype = self.type_combo.currentText()
+        valid = False
+
+        if subtype == "multicheck":
+            if self.text_title and self.text_widget:
+                valid = bool(self.text_title.text().strip() and self.text_widget.toPlainText().strip())
+        else:
+            if self.text_widget and isinstance(self.text_widget, QLineEdit):
+                valid = bool(self.text_widget.text().strip())
+
+        self.ok_button.setEnabled(valid)
 
     def get_data(self):
-        return {
-            "type": self.type_combo.currentText(),
-            "text": self.text_input.text().strip()
-        }
+        subtype = self.type_combo.currentText()
 
+        # Parse hints from QTextEdit into list of trimmed non-empty lines
+        hints = []
+        if self.hint_widget:
+            hints = [
+                line.strip() for line in self.hint_widget.toPlainText().splitlines() if line.strip()
+            ]
 
+        if subtype == "multicheck":
+            if not self.text_title or not self.text_widget:
+                return {"type": subtype, "text": "", "items": [], "hints": hints}
+            title = self.text_title.text().strip()
+            items = [
+                line.strip() for line in self.text_widget.toPlainText().splitlines() if line.strip()
+            ]
+            return {
+                "type": subtype,
+                "text": title,
+                "items": items,
+                "hints": hints
+            }
+        else:
+            text = self.text_widget.text().strip() if self.text_widget else ""
+            return {
+                "type": subtype,
+                "text": text,
+                "hints": hints
+            }
+
+    def rebuild_entry(self):
+        # Clear all widgets from the input container
+        for i in reversed(range(self.input_container.count())):
+            widget = self.input_container.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+
+        # Reset references
+        self.text_widget = None
+        self.text_title = None
+        self.hint_widget = None
+
+        subtype = self.type_combo.currentText()
+
+        if subtype == "multicheck":
+            self.input_container.addWidget(QLabel("Checklist Title:"))
+            self.text_title = QLineEdit()
+            self.text_title.setPlaceholderText("Enter checklist title...")
+            self.input_container.addWidget(self.text_title)
+
+            self.input_container.addWidget(QLabel("Checklist Items:"))
+            self.text_widget = QTextEdit()
+            self.text_widget.setPlaceholderText("Enter multiple options, one per line...")
+            self.input_container.addWidget(self.text_widget)
+
+            self.text_title.textChanged.connect(self.validate_input)
+            self.text_widget.textChanged.connect(self.validate_input)
+        else:
+            self.input_container.addWidget(QLabel("Text:"))
+            self.text_widget = QLineEdit()
+            self.text_widget.setPlaceholderText("Enter sub-process text...")
+            self.input_container.addWidget(self.text_widget)
+            self.text_widget.textChanged.connect(self.validate_input)
+
+        # --- Add hint input field for all types ---
+        self.input_container.addWidget(QLabel("Hints (one per line):"))
+        self.hint_widget = QTextEdit()
+        self.hint_widget.setPlaceholderText("Enter optional hints for this step...")
+        self.input_container.addWidget(self.hint_widget)
+
+        self.validate_input()
 class EditProcessesWidget(QWidget):
     def __init__(self, main):
         super().__init__()
