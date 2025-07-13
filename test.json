@@ -1,0 +1,225 @@
+{
+    "f33f2448-5b08-435d-9fce-ab4ec4ed8e66": {
+        "label": "Opening Trades DE vor 9 Uhr",
+        "temp": false,
+        "rule_dicts": [
+            {
+                "type": "condition",
+                "db": "sec",
+                "field": "region",
+                "op": "==",
+                "value": {
+                    "type": "string",
+                    "content": "DE"
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "first_trade",
+                "op": ">",
+                "value": {
+                    "type": "datetime",
+                    "content": [
+                        "*",
+                        "*",
+                        "*",
+                        "8",
+                        "50",
+                        "*"
+                    ]
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "remaining_quantity",
+                "op": "==",
+                "value": {
+                    "type": "number",
+                    "content": 0.0
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "first_trade",
+                "op": "<",
+                "value": {
+                    "type": "datetime",
+                    "content": [
+                        "*",
+                        "*",
+                        "*",
+                        "9",
+                        "0",
+                        "*"
+                    ]
+                }
+            }
+        ],
+        "position": 0,
+        "mapping_label": "OPENING",
+        "mapping_id": "c2d05e76-1ea9-44b7-bbdf-50035dc44738"
+    },
+    "8c983b7a-42f0-4f73-ad15-0ad06f504bab": {
+        "label": "Mittagsauktion DE zwischen 13:02 und 13:10",
+        "temp": false,
+        "rule_dicts": [
+            {
+                "type": "condition",
+                "db": "sec",
+                "field": "region",
+                "op": "==",
+                "value": {
+                    "type": "string",
+                    "content": "DE"
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "first_trade",
+                "op": ">=",
+                "value": {
+                    "type": "datetime",
+                    "content": [
+                        "*",
+                        "*",
+                        "*",
+                        "13",
+                        "2",
+                        "0"
+                    ]
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "remaining_quantity",
+                "op": "==",
+                "value": {
+                    "type": "number",
+                    "content": 0.0
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "first_trade",
+                "op": "<",
+                "value": {
+                    "type": "datetime",
+                    "content": [
+                        "*",
+                        "*",
+                        "*",
+                        "13",
+                        "6",
+                        "*"
+                    ]
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "last_trade",
+                "op": "<",
+                "value": {
+                    "type": "datetime",
+                    "content": [
+                        "*",
+                        "*",
+                        "*",
+                        "13",
+                        "10",
+                        "*"
+                    ]
+                }
+            }
+        ],
+        "position": 1,
+        "mapping_label": "MITTAGSAUKTION",
+        "mapping_id": "927656c8-9a2d-4e5c-a78b-5943ed5f3266"
+    },
+    "dd4257cc-0788-437a-bb76-cbf87f89dc85": {
+        "label": "Mittagsauktion am Verfallstag",
+        "temp": false,
+        "rule_dicts": [
+            {
+                "type": "condition",
+                "db": "sec",
+                "field": "region",
+                "op": "==",
+                "value": {
+                    "type": "string",
+                    "content": "DE"
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "first_trade",
+                "op": ">=",
+                "value": {
+                    "type": "datetime",
+                    "content": [
+                        "*",
+                        "*",
+                        "*",
+                        "13",
+                        "5",
+                        "0"
+                    ]
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "remaining_quantity",
+                "op": "==",
+                "value": {
+                    "type": "number",
+                    "content": 0.0
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "first_trade",
+                "op": "<",
+                "value": {
+                    "type": "datetime",
+                    "content": [
+                        "*",
+                        "*",
+                        "*",
+                        "13",
+                        "7",
+                        "*"
+                    ]
+                }
+            },
+            {
+                "type": "condition",
+                "db": "pos",
+                "field": "last_trade",
+                "op": "<",
+                "value": {
+                    "type": "datetime",
+                    "content": [
+                        "*",
+                        "*",
+                        "*",
+                        "13",
+                        "15",
+                        "*"
+                    ]
+                }
+            }
+        ],
+        "position": 2,
+        "mapping_label": "MITTAGSAUKTION",
+        "mapping_id": "927656c8-9a2d-4e5c-a78b-5943ed5f3266"
+    }
+}

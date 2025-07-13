@@ -1,10 +1,27 @@
 import re
-from datetime import datetime, timedelta
-test_string = "$OR($AND(?security.region == \"CA\"?, ?research.last_trade == (*,*,*,8,*,*)?),?security.price := /2,4/?, ?research.last_trade>{0,0,0,5,0,0}?)"
+import pydantic
 
-import re
+from pydantic import BaseModel
+import typing
+from datetime import datetime, timedelta
+test_string = "$OR($AND(?security.region == \"CA\"?, ?research.last_trade == (*,*,*,8,*,*)?),?security.price := /2,4/?, ?research.last_trade>{0,0,0,0,5,0}?)"
+
+test_data = {
+    "security": {
+        "region": "CA",            # matches == "CA"
+        "price": 4                 # matches := [2,4]
+    },
+    "research": {
+        "last_trade": datetime(2025, 7, 11, 2, 15, 30)  # hour=8 → matches (*,*,*,8,*,*)
+                                                        # also > {0,0,0,5,0,0}
+    }
+}
+
+
 
 LOGICAL_OPERATORS = {'$NOT', '$AND', '$OR'}
+Booloperators = {'TRUE', 'FALSE'}
+
 schema = {
     "security.region": "string",
     "security.price": "float",
@@ -12,6 +29,8 @@ schema = {
     "orders.quantity": "int",
     "user.active": "boolean",
 }
+
+
 def logical_tokenize(input_str):
     tokens = []
     pos = 0
@@ -275,12 +294,22 @@ def tokenize_condition(cond: str):
             i = j + 1
             continue
 
+        # Check for TRUE/FALSE (case-insensitive)
+        if cond[i:i+4].upper() == "TRUE":
+            tokens.append(("BOOL", True))
+            i += 4
+            continue
+        elif cond[i:i+5].upper() == "FALSE":
+            tokens.append(("BOOL", False))
+            i += 5
+            continue
 
         # -------------------------------------------------
         # 1. database.field    (exactly one dot)
         # -------------------------------------------------
         # read first identifier
         if cond[i].isalpha() or cond[i] == '_':
+
             j = i + 1
             while j < n and (cond[j].isalnum() or cond[j] == '_'):
                 j += 1
@@ -339,6 +368,9 @@ def tokenize_condition(cond: str):
             i += 1
             continue
 
+
+
+
         # -------------------------------------------------
         # 5. String literal  "...."
         # -------------------------------------------------
@@ -357,12 +389,24 @@ def tokenize_condition(cond: str):
             continue
 
         # -------------------------------------------------
-        # 6. Number  (integer only here for brevity)
-        # -------------------------------------------------
-        if cond[i].isdigit():
-            j = i + 1
-            while j < n and cond[j].isdigit():
+        # 6. Number (supporting optional '-' and decimals)
+        # -----------------------------------------------
+        if cond[i].isdigit() or (
+                cond[i] == '-' and i + 1 < n and (cond[i + 1].isdigit() or cond[i + 1] == '.')
+        ) or (
+                cond[i] == '.' and i + 1 < n and cond[i + 1].isdigit()
+        ):
+            j = i
+            has_dot = False
+
+            if cond[j] == '-':
+                j += 1  # Skip minus
+
+            while j < n and (cond[j].isdigit() or (cond[j] == '.' and not has_dot)):
+                if cond[j] == '.':
+                    has_dot = True
                 j += 1
+
             tokens.append(("NUMBER", cond[i:j]))
             i = j
             continue
@@ -409,13 +453,16 @@ class ConditionParser:
             value = {"type": "string", "content": token_value}
         elif token_type in ("NUMBER"):
             self.advance()
-            value = {"type": "number", "content": token_value}
+            value = {"type": "number", "content": float(token_value)}
         elif token_type == "TIMEDELTA":
             self.advance()
             value = {"type": "timedelta", "content": token_value}
         elif token_type == "DATETIME":
             self.advance()
             value = {"type": "datetime", "content": token_value}
+        elif token_type == "BOOL":
+            self.advance()
+            value = {"type": "bool", "content": token_value}
         elif token_type == "RANGE":
             self.advance()
             value = {"type": "range", "low": token_value[0], "high": token_value[1]}
@@ -516,6 +563,7 @@ def is_number_or_string(val, additional_strings=None):
     return False
 
 def validate_condition_node(node, schema):
+    print(node)
     db = node['db']
     field = node['field']
     op = node["op"]
@@ -527,7 +575,7 @@ def validate_condition_node(node, schema):
     schema_type = schema[full_field]
     value = node['value']
     val_type = value.get("type")
-    content = value.get("content") or value.get("value")  # fallback for old structure
+    content = value.get("content")  # fallback for old structure
 
     # --- String Validation ---
     if schema_type == "string":
@@ -539,8 +587,8 @@ def validate_condition_node(node, schema):
             raise ValueError(f"String validation failed at: {full_field} with op {op} and value {value}")
 
     # --- Number Validation ---
-    if schema_type in ["int", "float"]:
-        print(val_type)
+    elif schema_type in ["int", "float"]:
+        print(555,schema_type,val_type,content)
         if val_type == "number" and isinstance(content, (int, float)) and op in ["<", "<=", "==", ">", ">="]:
             return
         elif val_type == "list" and isinstance(content, list) and op == ":=" and all(isinstance(item, (int, float)) for item in content):
@@ -551,13 +599,19 @@ def validate_condition_node(node, schema):
             raise ValueError(f"Number validation failed at: {full_field} with op {op} and value {value}")
 
     # --- Datetime Validation ---
-    if schema_type == "datetime":
+    elif schema_type == "datetime":
         if val_type == "timedelta" and op in ["<", "<=", "==", ">", ">="] and all(is_number_or_string(x) for x in content):
             return
         if val_type == "datetime" and op in ["<", "<=", "==", ">", ">="] and all(is_number_or_string(x, ["*"]) for x in content):
             return
         else:
             raise ValueError(f"Datetime validation failed at: {full_field} with op {op} and value {value}")
+
+    elif schema_type == "bool":
+        if val_type == "bool" and op == "==":
+            return
+        else:
+            raise ValueError(f"Boolean validation failed at: {full_field} with op {op} and value {value}")
 
     raise ValueError(f"Unhandled schema type: {schema_type}")
 
@@ -580,6 +634,13 @@ def validate_tree(tree, schema):
         for arg in tree['args']:
             validate_tree(arg, schema)
 
+def evaluate_tree_conditions(tree,data):
+    if tree['type'] == 'condition':
+        tree["eval_result"] = condition_evaluator(tree, data)
+    elif tree['type'] == 'operator':
+        for arg in tree['args']:
+            evaluate_tree_conditions(arg, data)
+
 
 def process_input_string(input_string:str ,valid_fields:dict):
     logical_tokens = logical_tokenize(input_string)
@@ -591,7 +652,6 @@ def process_input_string(input_string:str ,valid_fields:dict):
 
 
 
-data = process_input_string(test_string ,schema)
 
 def condition_evaluator(condition,data):
     value = condition.get("value")
@@ -652,7 +712,8 @@ def condition_evaluator(condition,data):
 
     elif value_type == "range":
         if op == ":=":
-            if reference >= value.get("low") and reference<=value.get("high"):
+
+            if reference >= float(value.get("low")) and reference<=float(value.get("high")):
                 return True
             else:
                 return False
@@ -805,12 +866,198 @@ def condition_evaluator(condition,data):
 
 
     elif value_type == "bool":
-        return value_type == reference
+        return value.get("content") == reference
 
 
 
+#def logical_evaluator(input_ast):
 
 
+def evaluate_expression(node):
+    if node["type"] == "condition":
+        return node["eval_result"]
+
+    elif node["type"] == "operator":
+        op = node["operator"]
+        args = node["args"]
+
+        if op == "$AND":
+            return all(evaluate_expression(arg) for arg in args)
+
+        elif op == "$OR":
+            return any(evaluate_expression(arg) for arg in args)
+
+        elif op == "$NOT":
+            if len(args) != 1:
+                raise ValueError(f"$NOT expects exactly one argument, got {len(args)}")
+            return not evaluate_expression(args[0])
+
+        else:
+            raise ValueError(f"Unknown operator: {op}")
+
+def reconstruct_expression(node):
+    if node["type"] == "operator":
+        op = node["operator"]
+        args = [reconstruct_expression(arg) for arg in node["args"]]
+        return f"{op}({','.join(args)})"
+
+    elif node["type"] == "condition":
+        db = node["db"]
+        field = node["field"]
+        op = node["op"]
+        val = node["value"]
+        val_str = serialize_value(val)
+        return f"?{db}.{field} {op} {val_str}?"
+
+    else:
+        raise ValueError(f"Unknown node type: {node['type']}")
 
 
+def list_to_str(content):
+    def quote_if_str(x):
+        if isinstance(x, str):
+            return f'"{x}"'
+        else:
+            return str(x)
+    return "[" + ",".join(quote_if_str(x) for x in content) + "]"
 
+def serialize_value(val):
+    vtype = val["type"]
+    content = val["content"] if "content" in val else None
+
+    if vtype == "string":
+        return f"\"{content}\""
+    elif vtype == "number":
+        return str(content)
+    elif vtype == "range":
+        return f"/{val['low']},{val['high']}/"
+    elif vtype == "list":
+        return list_to_str(content)
+    elif vtype == "datetime":
+        return "(" + ",".join(str(c) for c in content) + ")"
+    elif vtype == "timedelta":
+        return "{" + ",".join(str(c) for c in content) + "}"
+    elif vtype == "bool":
+        return str(content)
+    else:
+        raise ValueError(f"Unknown value type: {vtype}")
+
+def resolve_type(ann) -> str:
+    origin =typing.get_origin(ann)
+    args = typing.get_args(ann)
+
+    # Handle Optional or Union[..., None]
+    if origin is typing.Union:
+        non_none = [arg for arg in args if arg is not type(None)]
+        if len(non_none) == 1:
+            return resolve_type(non_none[0])
+        else:
+            return "union"
+
+    # Handle Literal
+    if origin is typing.Literal:
+        if all(isinstance(arg, str) for arg in args):
+            return "string"
+        elif all(isinstance(arg, int) for arg in args):
+            return "number"
+        elif all(isinstance(arg, float) for arg in args):
+            return "float"
+        elif all(isinstance(arg, bool) for arg in args):
+            return "bool"
+        else:
+            return "mixed"
+
+    # Handle List[...] types
+    if origin in (list, typing.List):
+        inner = args[0]
+        return f"list[{resolve_type(inner)}]"
+
+    # Handle primitive types
+    if ann is str:
+        return "string"
+    elif ann is int:
+        return "int"
+    elif ann is float:
+        return "float"
+    elif ann is bool:
+        return "bool"
+    elif ann in (datetime, getattr(__import__('datetime'), 'datetime', object())):
+        return "datetime"
+    elif ann is timedelta:
+        return "timedelta"
+
+    # Fallback
+    return str(ann)
+def create_valid_fields_dict(model: BaseModel,name: str = None) -> dict:
+    """
+    creates a dict with valid fields and type requirements
+    :param model:
+    :return:
+    """
+    model_name = name if name else model.__name__
+    output = {}
+    fields = list(model.model_fields.keys())
+    for field in fields:
+        try:
+            info = model.model_fields[field]
+            print(info)
+            output_type = resolve_type(info.annotation)
+            output[f"{model_name}.{field}"] = output_type
+        except Exception as err:
+            print(f"Error creating valid field for {field} {info} because of {err}")
+            pass
+    return output
+
+# Formatted HTML tooltip
+tooltip_html = """
+<b>How to add data:</b><br>
+Every line is a condition and all lines are connected with logical operator <code>AND</code><br><br>
+
+<code>?cond_A?</code><br>
+<code>?cond_B?</code><br>
+equals<br>
+<code>$AND(?cond_A?, ?cond_B?)</code><br><br>
+
+<b>Logical operators to use:</b><br>
+<ul>
+  <li><code>$NOT(?cond?)</code></li>
+  <li><code>$AND(?cond_1?, ?cond_2?)</code></li>
+  <li><code>$OR($NOT(?cond_1?), ?cond_2?)</code></li>
+</ul>
+
+<b>How to construct conditions:</b><br>
+<ul>
+  <li>Start and end conditions with <code>?</code>: <code>?sec.region == "CA"?</code></li>
+  <li>First arg is <code>db.field</code>: <code>?sec.region := ["CA","US"]?</code></li>
+  <li>Second is operator: <code>?sec.tdg_listing &lt; {0,0,30,0,0,0}?</code></li>
+  <li>Third is value: <code>?trade.price := /7,11/?</code></li>
+</ul>
+
+<b>Operators are:</b><br>
+<ul>
+  <li><code>==</code> (equals)</li>
+  <li><code>&gt;, &gt;=, &lt;=, &lt;</code> (greater, lesser)</li>
+  <li><code>:=</code> (in)</li>
+  <li><code>&lt;&gt;</code> (contains)</li>
+</ul>
+
+<b>Value types:</b><br>
+<ul>
+  <li><b>Number</b>: <code>?sec.price &gt; 2?</code></li>
+  <li><b>String</b>: <code>?sec.region == "CA"?</code> (wrap in <code>"..."</code>)</li>
+  <li><b>List</b>: <code>?sec.region in ["CA","US"]?</code> (no mixed types)</li>
+  <li><b>Bool</b>: <code>?sec.tdg_listing == TRUE?</code> (use <code>TRUE</code> or <code>FALSE</code>, case-sensitive)</li>
+  <li><b>Range</b>: <code>?trade.price := /7,11/?</code></li>
+  <li><b>Age</b>: <code>?sec.tdg_listing &lt; {1,2,3,4,5,6}?</code> (years, months, days, hours, mins, secs)</li>
+  <li><b>Datetime</b>: <code>?pos_first_trade &lt; (2025,12,30,1,2,3)?</code><br>
+      Use wildcards: <code>?pos.first_trade &lt; (*,*,*,9,0,0)?</code> (before 09:00:00 any day)</li>
+</ul>
+"""
+
+if __name__ == "__main__":
+
+    data = process_input_string(test_string ,schema)
+    evaluate_tree_conditions(data,test_data)
+    print(data)
+    data = evaluate_expression(data)
+    print(data)
