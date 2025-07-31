@@ -183,6 +183,7 @@ class Process:
         else:
             raise RuntimeError(f"Cannot end a process that is not running")
 
+
     def kill(self):
         if self.status in ["running", "paused"]:
             self.status = "terminated"
@@ -1824,7 +1825,10 @@ class RunProcessWidget(QWidget):
 
             # You can collect data from all tasks here if needed
             print("Process finished.")
+            self.process.end()
+            self.process.save(self.main.answer_collection)
             self.return_to_main()
+
             # Do your finishing logic, e.g., save, mark status, close widget...
         except Exception as err:
             print(000,err)
@@ -3101,8 +3105,6 @@ class MainWindow(QWidget):
 
     def populate_load_table(self):
 
-        print(1199, self.processes_pending)
-
         # Clear the table
         self.save_and_load_widget.clearContents()
         self.save_and_load_widget.setRowCount(0)
@@ -3138,6 +3140,60 @@ class MainWindow(QWidget):
             id_item = self.save_and_load_widget.item(row, 0)
             if id_item:
                 id_item.setData(Qt.UserRole, process)
+
+    def populate_load_table(self):
+        self.save_and_load_widget.clearContents()
+        self.save_and_load_widget.setRowCount(0)
+        self.save_and_load_widget.setColumnCount(0)
+
+        if not hasattr(self, "processes_pending") or not self.processes_pending:
+            return
+
+        processes = self.processes_pending
+        if not processes:
+            return
+
+        # Only show selected fields
+        keys = ["title", "start_date","status"]
+        self.save_and_load_widget.setColumnCount(len(keys))
+        self.save_and_load_widget.setHorizontalHeaderLabels(keys)
+        self.save_and_load_widget.setRowCount(len(processes))
+
+        for row, process in enumerate(processes):
+            tooltip_lines = []
+
+            # Prepare tooltip: Tasks
+            if hasattr(process, "tasks"):
+                tooltip_lines.append("Tasks:")
+                for task in process.tasks:
+                    q = getattr(task, "question", "N/A")
+                    a = getattr(task, "answer", "—")
+                    tooltip_lines.append(f"- {q}: {a}")
+
+            # Prepare tooltip: Todos
+            if hasattr(process, "todos"):
+                tooltip_lines.append("\nTodos:")
+                for todo in process.todos:
+                    title = getattr(todo, "title", "N/A")
+                    checked = getattr(todo, "checked", False)
+                    status = "✓" if checked else "✗"
+                    tooltip_lines.append(f"- [{status}] {title}")
+
+            full_tooltip = "\n".join(tooltip_lines)
+
+            for col, key in enumerate(keys):
+                value = getattr(process, key, "")
+                text = str(value)
+                item = QTableWidgetItem(text)
+                item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                item.setToolTip(full_tooltip)
+                self.save_and_load_widget.setItem(row, col, item)
+
+            # Store full process in UserRole of first column
+            id_item = self.save_and_load_widget.item(row, 0)
+            if id_item:
+                id_item.setData(Qt.UserRole, process)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
